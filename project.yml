@@ -1,0 +1,46 @@
+name: AnyQuick
+options:
+  minimumXcodeGenVersion: 2.38.0
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+
+targets:
+  AnyQuick:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hjm.anyquick
+    sources:
+      - path: ActionManager.swift
+      - path: ContentView.swift
+      - path: KoreanScheduleParser.swift
+      - path: OmniCommandApp.swift
+      - path: OmniViewModel.swift
+      - path: SmartIntent.swift
+      - path: SmartParser.swift
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: AnyQuick
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSContactsUsageDescription: "연락처 기반 자동 메시지 추천을 위해 연락처 접근이 필요합니다."
+        NSLocationWhenInUseUsageDescription: "현위치 메시지 공유를 위해 위치 접근이 필요합니다."
+        NSCalendarsUsageDescription: "일정 등록 기능을 위해 캘린더 접근이 필요합니다."
+
+  AnyQuickTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hjm.anyquick.tests
+    sources:
+      - path: KoreanScheduleParserTests.swift
+      - path: SmartParserTests.swift
+    dependencies:
+      - target: AnyQuick

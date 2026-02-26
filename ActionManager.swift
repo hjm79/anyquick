@@ -8,12 +8,15 @@ import EventKitUI
 
 @MainActor
 final class ActionManager: NSObject, ObservableObject {
+    @Published var actionNotice: String?
+
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
 
     private var locationManager: CLLocationManager?
     private var locationAuthContinuation: CheckedContinuation<Bool, Never>?
     private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+    private var noticeResetTask: Task<Void, Never>?
 
     func execute(_ intent: SmartIntent) async {
         switch intent {
@@ -29,10 +32,52 @@ final class ActionManager: NSObject, ObservableObject {
             break
         }
     }
+
+    func fetchAllContactNames() async -> [String] {
+        let granted = await requestContactsAccessIfNeeded()
+        guard granted else { return [] }
+
+        let keys: [CNKeyDescriptor] = [
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactMiddleNameKey as CNKeyDescriptor,
+            CNContactNicknameKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+
+        var names = Set<String>()
+        do {
+            try contactStore.enumerateContacts(with: request) { contact, _ in
+                let family = contact.familyName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let given = contact.givenName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let middle = contact.middleName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nickname = contact.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let compactFull = "\(family)\(middle)\(given)".trimmingCharacters(in: .whitespacesAndNewlines)
+                let spacedFull = [family, middle, given].filter { !$0.isEmpty }.joined(separator: " ")
+                let reversed = [given, family].filter { !$0.isEmpty }.joined(separator: " ")
+
+                for candidate in [compactFull, spacedFull, reversed, given, nickname] {
+                    guard !candidate.isEmpty else { continue }
+                    names.insert(candidate)
+                    let noSpaces = candidate.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+                    if !noSpaces.isEmpty {
+                        names.insert(noSpaces)
+                    }
+                }
+            }
+        } catch {
+            return []
+        }
+
+        return names.sorted()
+    }
 }
 
 // MARK: - Navigation
 private extension ActionManager {
+    var kakaoRestAPIKey: String { "YOUR_REST_API_KEY" }
+
     struct KakaoLocalResponseDTO: Decodable {
         let documents: [KakaoPlaceDTO]
     }
@@ -48,18 +93,67 @@ private extension ActionManager {
 
         let encodedName = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
 
-        if let place = await fetchKakaoCoordinate(for: trimmed),
-           let tmapURL = URL(string: "tmap://?rGoName=\(encodedName)&rGoY=\(place.y)&rGoX=\(place.x)") {
-            let opened = await openURL(tmapURL)
-            if opened { return }
+        // 1) Coordinate-aware deep link first (when Kakao Local succeeds)
+        if let place = await fetchKakaoCoordinate(for: trimmed) {
+            if let tmapURL = URL(string: "tmap://?rGoName=\(encodedName)&rGoY=\(place.y)&rGoX=\(place.x)") {
+                let opened = await openURL(tmapURL)
+                if opened {
+                    showNotice("Tmap으로 길안내를 시작합니다.")
+                    return
+                }
+            }
+
+            if let kakaoMapWithCoord = URL(string: "kakaomap://look?p=\(place.y),\(place.x)") {
+                let opened = await openURL(kakaoMapWithCoord)
+                if opened {
+                    showNotice("카카오맵으로 길안내를 시작합니다.")
+                    return
+                }
+            }
+
+            if let appleMapsWithCoord = URL(string: "http://maps.apple.com/?q=\(encodedName)&ll=\(place.y),\(place.x)") {
+                let opened = await openURL(appleMapsWithCoord)
+                if opened {
+                    showNotice("Apple 지도에서 목적지를 엽니다.")
+                    return
+                }
+            }
         }
 
+        // 2) Keyword search deep links
         if let fallbackURL = URL(string: "kakaomap://search?q=\(encodedName)") {
-            _ = await openURL(fallbackURL)
+            let opened = await openURL(fallbackURL)
+            if opened {
+                showNotice("카카오맵 검색으로 이동합니다.")
+                return
+            }
         }
+
+        // 3) Always-available fallback (simulator safe)
+        if let appleMapsSearch = URL(string: "http://maps.apple.com/?q=\(encodedName)") {
+            let opened = await openURL(appleMapsSearch)
+            if opened {
+                showNotice("Apple 지도 검색으로 이동합니다.")
+                return
+            }
+        }
+
+        if let webMapSearch = URL(string: "https://map.kakao.com/link/search/\(encodedName)") {
+            let opened = await openURL(webMapSearch)
+            if opened {
+                showNotice("카카오맵 웹으로 이동합니다.")
+                return
+            }
+        }
+
+        showNotice("지도 앱을 열지 못했습니다.")
     }
 
     func fetchKakaoCoordinate(for destination: String) async -> KakaoPlaceDTO? {
+        guard !kakaoRestAPIKey.isEmpty, kakaoRestAPIKey != "YOUR_REST_API_KEY" else {
+            return nil
+        }
+
         let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? destination
         guard let url = URL(string: "https://dapi.kakao.com/v2/local/search/keyword.json?query=\(encoded)") else {
             return nil
@@ -67,7 +161,7 @@ private extension ActionManager {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("KakaoAK YOUR_REST_API_KEY", forHTTPHeaderField: "Authorization")
+        request.setValue("KakaoAK \(kakaoRestAPIKey)", forHTTPHeaderField: "Authorization")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -138,7 +232,7 @@ private extension ActionManager {
 
     func requestContactsAccessIfNeeded() async -> Bool {
         switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .authorized:
+        case .authorized, .limited:
             return true
         case .denied, .restricted:
             return false
@@ -197,7 +291,7 @@ private extension ActionManager {
         let event = EKEvent(eventStore: eventStore)
         event.title = parsed.title
         event.startDate = parsed.start
-        event.endDate = parsed.end ?? parsed.start.addingTimeInterval(3600)
+        event.endDate = parsed.end
         event.isAllDay = parsed.allDay
         event.location = parsed.location
         event.calendar = eventStore.defaultCalendarForNewEvents
@@ -256,11 +350,23 @@ private extension ActionManager {
 
         guard let url = URL(string: urlString) else { return }
         UIApplication.shared.open(url)
+        showNotice("검색을 실행했습니다.")
     }
 }
 
 // MARK: - Presentation / URL
 private extension ActionManager {
+    func showNotice(_ message: String) {
+        actionNotice = message
+        noticeResetTask?.cancel()
+        noticeResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled {
+                actionNotice = nil
+            }
+        }
+    }
+
     func topViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }

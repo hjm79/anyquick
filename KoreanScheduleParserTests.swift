@@ -1,4 +1,5 @@
 import XCTest
+@testable import AnyQuick
 
 final class KoreanScheduleParserTests: XCTestCase {
     private var calendar: Calendar!
@@ -149,6 +150,40 @@ final class KoreanScheduleParserTests: XCTestCase {
     func testFailsOnInvalidAMPMHour() {
         let result = parser.parse("오늘 오후 13시에 테스트", baseDate: baseNow)
         XCTAssertNil(result)
+    }
+
+    func testParsesDayModifierMore() {
+        let result = parser.parse("모레 오전 9시에 출근", baseDate: baseNow)
+        XCTAssertNotNil(result)
+        assertDate(result?.start, year: 2026, month: 2, day: 19, hour: 9, minute: 0)
+    }
+
+    func testParsesWeekAliasDamju() {
+        let result = parser.parse("담주 화요일 오후 3시에 회의", baseDate: baseNow)
+        XCTAssertNotNil(result)
+        assertDate(result?.start, year: 2026, month: 2, day: 24, hour: 15, minute: 0)
+    }
+
+    func testParsesWeekAliasDadamju() {
+        let result = parser.parse("다담주 화요일 오후 3시에 회의", baseDate: baseNow)
+        XCTAssertNotNil(result)
+        assertDate(result?.start, year: 2026, month: 3, day: 3, hour: 15, minute: 0)
+    }
+
+    func testIncludesSourceField() {
+        let input = "내일 오후 3시에 회의"
+        let result = parser.parse(input, baseDate: baseNow)
+        XCTAssertEqual(result?.source, input)
+    }
+
+    func testParseResultReturnsErrorForEmptyInput() {
+        let result = parser.parseResult("   ", baseDate: baseNow)
+        switch result {
+        case .success:
+            XCTFail("Expected failure for empty input")
+        case .failure(let error):
+            XCTAssertFalse(error.message.isEmpty)
+        }
     }
 }
 

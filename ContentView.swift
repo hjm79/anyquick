@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = OmniViewModel()
+    @FocusState private var isInputFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -13,6 +15,10 @@ struct ContentView: View {
         ZStack {
             Color(UIColor.systemGroupedBackground)
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isInputFocused = false
+                }
 
             VStack(spacing: 18) {
                 inputSection
@@ -22,6 +28,35 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
+        }
+        .overlay(alignment: .top) {
+            if let notice = viewModel.actionNotice {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.white)
+                    Text(notice)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.85))
+                .clipShape(Capsule())
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                isInputFocused = true
+            }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            Task {
+                await viewModel.refreshContacts()
+            }
         }
     }
 }
@@ -33,6 +68,13 @@ private extension ContentView {
                 .font(.system(size: 19, weight: .medium))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
+                .submitLabel(.go)
+                .focused($isInputFocused)
+                .onSubmit {
+                    guard viewModel.hasPredictedIntent else { return }
+                    isInputFocused = false
+                    viewModel.executePredictedIntent()
+                }
 
             Button {
                 viewModel.pasteFromClipboard()
@@ -107,6 +149,7 @@ private extension ContentView {
 
     func suggestionCard(icon: String, title: String, subtitle: String, detail: String, color: Color) -> some View {
         Button {
+            isInputFocused = false
             viewModel.executePredictedIntent()
         } label: {
             HStack(spacing: 14) {
@@ -166,6 +209,7 @@ private extension ContentView {
 
     func quickButton(title: String, icon: String, type: SearchType) -> some View {
         Button {
+            isInputFocused = false
             viewModel.executeManualSearch(type: type)
         } label: {
             VStack(spacing: 8) {

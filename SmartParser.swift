@@ -1,11 +1,17 @@
 import Foundation
 
-struct SmartParser {
+final class SmartParser {
     private let scheduleParser: KoreanScheduleParser
-    private let mockContacts = ["엄마", "팀장님", "김철수", "여자친구"]
+    private var contactPool: [String]
 
-    init(scheduleParser: KoreanScheduleParser = KoreanScheduleParser()) {
+    var contacts: [String] {
+        get { contactPool }
+        set { contactPool = Self.normalizeContacts(newValue) }
+    }
+
+    init(scheduleParser: KoreanScheduleParser = KoreanScheduleParser(), contacts: [String] = []) {
         self.scheduleParser = scheduleParser
+        self.contactPool = Self.normalizeContacts(contacts)
     }
 
     func parse(input: String, baseDate: Date = Date()) -> SmartIntent {
@@ -37,22 +43,27 @@ struct SmartParser {
 }
 
 private extension SmartParser {
+    struct ContactMatch {
+        let name: String
+        let range: Range<String.Index>
+    }
+
     func parseMessage(_ input: String) -> SmartIntent? {
-        guard let name = mockContacts.first(where: { input.contains($0) }) else { return nil }
+        guard let matched = findContactMatch(in: input) else { return nil }
 
         let hasCurrentLocation = input.contains("현위치") || input.contains("내위치")
 
         var message = input
-        message = message.replacingOccurrences(of: name, with: " ")
+        message.replaceSubrange(matched.range, with: " ")
         message = message.replacingOccurrences(of: "현위치", with: " ")
         message = message.replacingOccurrences(of: "내위치", with: " ")
         message = cleanText(message)
 
-        return .sendMessage(targetName: name, message: message, isCurrentLocation: hasCurrentLocation)
+        return .sendMessage(targetName: matched.name, message: message, isCurrentLocation: hasCurrentLocation)
     }
 
     func parseNavigation(_ input: String) -> SmartIntent? {
-        let keywords = ["내비", "안내", "길찾기", "카카오맵", "티맵"]
+        let keywords = ["내비", "네비", "네비게이션", "안내", "길찾기", "카카오맵", "티맵", "지도", "맵"]
         guard keywords.contains(where: { input.contains($0) }) else { return nil }
 
         var destination = input
@@ -117,5 +128,42 @@ private extension SmartParser {
         cleaned = cleaned.replacingOccurrences(of: #"[.,!?~`'\"\(\)\[\]{}<>:;|/\\\-_=+*&^%$#@]"#, with: " ", options: .regularExpression)
         cleaned = cleaned.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func findContactMatch(in input: String) -> ContactMatch? {
+        guard !contacts.isEmpty else { return nil }
+        let nsRange = NSRange(input.startIndex..<input.endIndex, in: input)
+        let particlePattern = "(?:에게|한테|께|님|씨|은|는|이|가|을|를|와|과|랑|하고|도|에서|으로|로|께서|에게서|한테서|한테로|에게로)"
+
+        for name in contacts.sorted(by: { $0.count > $1.count }) {
+            let escaped = NSRegularExpression.escapedPattern(for: name)
+            let pattern = "(^|[\\s\\p{P}])(\(escaped))(?=$|[\\s\\p{P}]|\(particlePattern))"
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            guard let match = regex.firstMatch(in: input, options: [], range: nsRange) else { continue }
+            let nameRange = match.range(at: 2)
+            guard let swiftRange = Range(nameRange, in: input) else { continue }
+            let matchedText = String(input[swiftRange])
+            return ContactMatch(name: matchedText, range: swiftRange)
+        }
+
+        return nil
+    }
+
+    static func normalizeContacts(_ names: [String]) -> [String] {
+        var set = Set<String>()
+
+        for raw in names {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            set.insert(trimmed)
+
+            let noSpaces = trimmed.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+            if !noSpaces.isEmpty {
+                set.insert(noSpaces)
+            }
+        }
+
+        return set.sorted { $0.count > $1.count }
     }
 }
