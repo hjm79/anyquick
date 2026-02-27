@@ -52,6 +52,32 @@ struct ContentView: View {
                 isInputFocused = true
             }
         }
+        .sheet(isPresented: $viewModel.isContactPickerPresented) {
+            contactPickerSheet
+        }
+        .confirmationDialog(
+            "전송 방식을 선택하세요",
+            isPresented: $viewModel.isMessageChannelSheetPresented,
+            titleVisibility: .visible
+        ) {
+            Button("문자로 보내기") {
+                isInputFocused = false
+                viewModel.sendPendingMessageAsSMS()
+            }
+            Button("앱 선택해서 공유하기") {
+                isInputFocused = false
+                viewModel.sendPendingMessageAsAppShare()
+            }
+            Button("취소", role: .cancel) {
+                viewModel.cancelPendingMessageSelection()
+            }
+        } message: {
+            if viewModel.pendingMessageTargetLabel.isEmpty {
+                Text("문자 또는 공유 시트에서 카카오톡 등 앱을 선택할 수 있습니다.")
+            } else {
+                Text("\(viewModel.pendingMessageTargetLabel)에게 보낼 메시지를 문자 또는 공유 앱으로 전송합니다.")
+            }
+        }
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
             Task {
@@ -71,7 +97,6 @@ private extension ContentView {
                 .submitLabel(.go)
                 .focused($isInputFocused)
                 .onSubmit {
-                    guard viewModel.hasPredictedIntent else { return }
                     isInputFocused = false
                     viewModel.executePredictedIntent()
                 }
@@ -110,7 +135,17 @@ private extension ContentView {
         } else {
             switch viewModel.predictedIntent {
             case .unknown:
-                Spacer().frame(height: 120)
+                if !viewModel.contactSelectionPreview.isEmpty {
+                    suggestionCard(
+                        icon: "person.crop.circle.badge.checkmark",
+                        title: "연락처 선택",
+                        subtitle: viewModel.contactSelectionKeyword,
+                        detail: viewModel.contactSelectionPreview.joined(separator: ", "),
+                        color: .mint
+                    )
+                } else {
+                    Spacer().frame(height: 120)
+                }
             case .addSchedule(let schedule):
                 suggestionCard(
                     icon: "calendar.badge.plus",
@@ -124,7 +159,7 @@ private extension ContentView {
                     icon: "message.fill",
                     title: "메시지 발송",
                     subtitle: targetName,
-                    detail: isCurrentLocation ? "\(message) · 현위치 포함" : message,
+                    detail: isCurrentLocation ? "\(message) · 카카오/네이버 위치링크 포함" : message,
                     color: .green
                 )
             case .navigation(let destination):
@@ -194,6 +229,36 @@ private extension ContentView {
         }
         .buttonStyle(.plain)
         .transition(.scale(scale: 0.95).combined(with: .opacity))
+    }
+
+    var contactPickerSheet: some View {
+        NavigationView {
+            List(viewModel.contactPickerCandidates, id: \.self) { name in
+                Button {
+                    isInputFocused = false
+                    viewModel.selectContactCandidate(name)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 20))
+                            .foregroundColor(.blue)
+                        Text(name)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(.primary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("연락처 선택")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") {
+                        viewModel.cancelContactSelection()
+                    }
+                }
+            }
+        }
     }
 
     var shortcutGrid: some View {

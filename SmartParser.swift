@@ -1,5 +1,12 @@
 import Foundation
 
+struct ContactSelectionContext {
+    let keyword: String
+    let candidates: [String]
+    let message: String
+    let isCurrentLocation: Bool
+}
+
 final class SmartParser {
     private let scheduleParser: KoreanScheduleParser
     private var contactPool: [String]
@@ -40,9 +47,48 @@ final class SmartParser {
 
         return .unknown
     }
+
+    func contactSelectionContext(input: String) -> ContactSelectionContext? {
+        let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        guard let keywordMatch = findKeywordBeforeRecipientParticle(in: raw) else { return nil }
+
+        let normalizedKeyword = normalizeForLookup(keywordMatch.keyword)
+        guard !normalizedKeyword.isEmpty else { return nil }
+
+        let candidates = contacts
+            .filter { !normalizeForLookup($0).isEmpty }
+            .filter {
+                let normalizedName = normalizeForLookup($0)
+                return normalizedName.contains(normalizedKeyword) || normalizedKeyword.contains(normalizedName)
+            }
+            .sorted { lhs, rhs in
+                rankContact(lhs, keyword: normalizedKeyword) < rankContact(rhs, keyword: normalizedKeyword)
+            }
+
+        guard !candidates.isEmpty else { return nil }
+
+        var message = raw
+        message.replaceSubrange(keywordMatch.fullRange, with: " ")
+        let hasCurrentLocation = containsCurrentLocationToken(in: raw)
+        message = stripCurrentLocationTokens(in: message)
+        message = cleanText(message)
+
+        return ContactSelectionContext(
+            keyword: keywordMatch.keyword,
+            candidates: candidates,
+            message: message,
+            isCurrentLocation: hasCurrentLocation
+        )
+    }
 }
 
 private extension SmartParser {
+    struct RecipientKeywordMatch {
+        let keyword: String
+        let fullRange: Range<String.Index>
+    }
+
     struct ContactMatch {
         let name: String
         let range: Range<String.Index>
@@ -51,12 +97,11 @@ private extension SmartParser {
     func parseMessage(_ input: String) -> SmartIntent? {
         guard let matched = findContactMatch(in: input) else { return nil }
 
-        let hasCurrentLocation = input.contains("현위치") || input.contains("내위치")
+        let hasCurrentLocation = containsCurrentLocationToken(in: input)
 
         var message = input
         message.replaceSubrange(matched.range, with: " ")
-        message = message.replacingOccurrences(of: "현위치", with: " ")
-        message = message.replacingOccurrences(of: "내위치", with: " ")
+        message = stripCurrentLocationTokens(in: message)
         message = cleanText(message)
 
         return .sendMessage(targetName: matched.name, message: message, isCurrentLocation: hasCurrentLocation)
@@ -142,11 +187,52 @@ private extension SmartParser {
             guard let match = regex.firstMatch(in: input, options: [], range: nsRange) else { continue }
             let nameRange = match.range(at: 2)
             guard let swiftRange = Range(nameRange, in: input) else { continue }
-            let matchedText = String(input[swiftRange])
-            return ContactMatch(name: matchedText, range: swiftRange)
+            return ContactMatch(name: name, range: swiftRange)
         }
 
         return nil
+    }
+
+    func findKeywordBeforeRecipientParticle(in input: String) -> RecipientKeywordMatch? {
+        let nsRange = NSRange(input.startIndex..<input.endIndex, in: input)
+        let pattern = #"([가-힣A-Za-z0-9]+)\s*(에게|한테|께)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: input, options: [], range: nsRange),
+              let keywordRange = Range(match.range(at: 1), in: input),
+              let fullRange = Range(match.range(at: 0), in: input) else {
+            return nil
+        }
+
+        let keyword = String(input[keywordRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return nil }
+        return RecipientKeywordMatch(keyword: keyword, fullRange: fullRange)
+    }
+
+    func containsCurrentLocationToken(in text: String) -> Bool {
+        text.range(of: #"(현\s*위치|내\s*위치|현재\s*위치|현위치|내위치)"#, options: .regularExpression) != nil
+    }
+
+    func stripCurrentLocationTokens(in text: String) -> String {
+        text.replacingOccurrences(
+            of: #"(현\s*위치|내\s*위치|현재\s*위치|현위치|내위치)"#,
+            with: " ",
+            options: .regularExpression
+        )
+    }
+
+    func rankContact(_ name: String, keyword: String) -> (Int, Int, String) {
+        let normalized = normalizeForLookup(name)
+        let exact = normalized == keyword ? 0 : 1
+        let prefix = normalized.hasPrefix(keyword) ? 0 : 1
+        let lengthDiff = abs(normalized.count - keyword.count)
+        return (exact + prefix, lengthDiff, normalized)
+    }
+
+    func normalizeForLookup(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     static func normalizeContacts(_ names: [String]) -> [String] {
@@ -157,11 +243,6 @@ private extension SmartParser {
             guard !trimmed.isEmpty else { continue }
 
             set.insert(trimmed)
-
-            let noSpaces = trimmed.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
-            if !noSpaces.isEmpty {
-                set.insert(noSpaces)
-            }
         }
 
         return set.sorted { $0.count > $1.count }

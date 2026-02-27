@@ -53,4 +53,35 @@ final class SmartParserTests: XCTestCase {
         }
         XCTAssertEqual(targetName, "여자친구")
     }
+
+    func testContactSelectionContextForRecipientParticle() {
+        let parser = SmartParser(contacts: ["정만", "정만수", "홍길동"])
+        let context = parser.contactSelectionContext(input: "정만에게 회의자료 보내줘")
+
+        XCTAssertNotNil(context)
+        XCTAssertEqual(context?.keyword, "정만")
+        XCTAssertEqual(context?.candidates.first, "정만")
+        XCTAssertTrue(context?.message.contains("회의자료") == true)
+    }
+
+    func testContactSelectionContextIncludesCurrentLocationFlag() {
+        let parser = SmartParser(contacts: ["정만"])
+        let context = parser.contactSelectionContext(input: "정만에게 현위치 보내줘")
+
+        XCTAssertNotNil(context)
+        XCTAssertEqual(context?.isCurrentLocation, true)
+    }
+
+    func testMessageDetectsCurrentLocationWithSpace() {
+        let parser = SmartParser(contacts: ["정만"])
+        let intent = parser.parse(input: "정만에게 현재 위치 보내줘")
+
+        guard case .sendMessage(let targetName, _, let isCurrentLocation) = intent else {
+            XCTFail("Expected sendMessage intent")
+            return
+        }
+
+        XCTAssertEqual(targetName, "정만")
+        XCTAssertTrue(isCurrentLocation)
+    }
 }

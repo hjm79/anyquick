@@ -8,6 +8,17 @@ import EventKitUI
 
 @MainActor
 final class ActionManager: NSObject, ObservableObject {
+    enum MessageChannel {
+        case sms
+        case appShare
+    }
+
+    enum LocationShareType {
+        case kakao
+        case naver
+        case both
+    }
+
     @Published var actionNotice: String?
 
     private let contactStore = CNContactStore()
@@ -23,13 +34,46 @@ final class ActionManager: NSObject, ObservableObject {
         case .addSchedule(let parsed):
             await presentScheduleEditor(with: parsed)
         case .sendMessage(let targetName, let message, let isCurrentLocation):
-            await presentMessageComposer(targetName: targetName, message: message, isCurrentLocation: isCurrentLocation)
+            await executeMessage(
+                targetName: targetName,
+                message: message,
+                isCurrentLocation: isCurrentLocation,
+                channel: .sms,
+                locationShareType: .both
+            )
         case .navigation(let destination):
             await openNavigation(destination: destination)
         case .webSearch(let query, let type):
             openWebSearch(query: query, type: type)
         case .unknown:
             break
+        }
+    }
+
+    func executeMessage(
+        targetName: String,
+        message: String,
+        isCurrentLocation: Bool,
+        channel: MessageChannel,
+        locationShareType: LocationShareType = .both
+    ) async {
+        let recipient = await findPhoneNumber(for: targetName)
+        let body = await composeMessageBody(
+            baseMessage: message,
+            isCurrentLocation: isCurrentLocation,
+            locationShareType: locationShareType
+        )
+
+        switch channel {
+        case .sms:
+            guard MFMessageComposeViewController.canSendText() else {
+                showNotice("문자를 사용할 수 없어 앱 공유로 전환합니다.")
+                presentShareSheet(text: body)
+                return
+            }
+            presentMessageComposer(recipient: recipient, body: body)
+        case .appShare:
+            presentShareSheet(text: body)
         }
     }
 
@@ -178,18 +222,7 @@ private extension ActionManager {
 
 // MARK: - Message
 private extension ActionManager {
-    func presentMessageComposer(targetName: String, message: String, isCurrentLocation: Bool) async {
-        guard MFMessageComposeViewController.canSendText() else { return }
-
-        let recipient = await findPhoneNumber(for: targetName)
-        var body = message
-
-        if isCurrentLocation, let location = await fetchCurrentLocation() {
-            let lat = location.coordinate.latitude
-            let lng = location.coordinate.longitude
-            body += "\n\n현위치: https://map.kakao.com/link/map/현위치,\(lat),\(lng)"
-        }
-
+    func presentMessageComposer(recipient: String?, body: String) {
         let composer = MFMessageComposeViewController()
         composer.messageComposeDelegate = self
         composer.body = body
@@ -200,6 +233,65 @@ private extension ActionManager {
 
         guard let presenter = topViewController() else { return }
         presenter.present(composer, animated: true)
+    }
+
+    func presentShareSheet(text: String) {
+        guard let presenter = topViewController() else { return }
+
+        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = activity.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.midY,
+                width: 1,
+                height: 1
+            )
+            popover.permittedArrowDirections = []
+        }
+
+        presenter.present(activity, animated: true)
+        showNotice("보낼 앱을 선택하세요. (문자/카카오톡 등)")
+    }
+
+    func composeMessageBody(
+        baseMessage: String,
+        isCurrentLocation: Bool,
+        locationShareType: LocationShareType
+    ) async -> String {
+        var body = baseMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if body.isEmpty {
+            body = "메시지를 보냅니다."
+        }
+
+        guard isCurrentLocation else {
+            return body
+        }
+
+        guard let location = await fetchCurrentLocation() else {
+            showNotice("현재 위치를 가져오지 못해 텍스트만 전송합니다.")
+            return body
+        }
+
+        let locationText = locationShareText(for: location, type: locationShareType)
+        return body + "\n\n" + locationText
+    }
+
+    func locationShareText(for location: CLLocation, type: LocationShareType) -> String {
+        let lat = location.coordinate.latitude
+        let lng = location.coordinate.longitude
+        let kakao = "https://map.kakao.com/link/map/현위치,\(lat),\(lng)"
+        let naver = "https://map.naver.com/v5/?c=\(lng),\(lat),16,0,0,0,dh"
+        let coordinate = String(format: "좌표: %.6f, %.6f", lat, lng)
+
+        switch type {
+        case .kakao:
+            return "현위치(카카오맵): \(kakao)\n\(coordinate)"
+        case .naver:
+            return "현위치(네이버맵): \(naver)\n\(coordinate)"
+        case .both:
+            return "현위치(카카오맵): \(kakao)\n현위치(네이버맵): \(naver)\n\(coordinate)"
+        }
     }
 
     func findPhoneNumber(for targetName: String) async -> String? {
