@@ -46,6 +46,14 @@ targets:
           - nflx
           - naversearchapp
           - coupang
+          - chatgpt
+          - googlegemini
+          - claude
+          - perplexity
+          - grok
+          - itms-apps
+          - tmdb
+          - navermap
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - anyquick
