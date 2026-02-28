@@ -41,6 +41,8 @@
 		<string>naversearchapp</string>
 		<string>coupang</string>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>일정 등록 기능을 위해 캘린더 접근이 필요합니다.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>일정 등록 기능을 위해 캘린더 접근이 필요합니다.</string>
 	<key>NSContactsUsageDescription</key>

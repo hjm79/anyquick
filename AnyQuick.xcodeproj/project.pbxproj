@@ -14,6 +14,7 @@
 		9340A0882188670DE9CA3173 /* OmniViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F1F4A4BC2AEBBEA57EA3E7 /* OmniViewModel.swift */; };
 		9EBD6634CB4F28A1B45A109C /* OmniCommandApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C539BB66ECBEA6BB1161D4 /* OmniCommandApp.swift */; };
 		B8FC142582ED2B1C3FE056FA /* ActionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB7EB8999D756FECC082D44 /* ActionManager.swift */; };
+		CB31DF72287EBDE1489ADF84 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 24B61D85B3FED7E9FD317110 /* PrivacyInfo.xcprivacy */; };
 		D3000F1CA8E3F07295B4356C /* SmartParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B7060E17A20A471A8FD200 /* SmartParserTests.swift */; };
 		E9895A507FCE5A03FE3E9989 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946C60AEC24AF83340C8B62A /* ContentView.swift */; };
 		EDF5CB0AA9ADF3394963A746 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8775C8042B77DFB4E9B2904B /* Assets.xcassets */; };
@@ -32,6 +33,7 @@
 /* Begin PBXFileReference section */
 		1AB7EB8999D756FECC082D44 /* ActionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionManager.swift; sourceTree = "<group>"; };
 		20C539BB66ECBEA6BB1161D4 /* OmniCommandApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniCommandApp.swift; sourceTree = "<group>"; };
+		24B61D85B3FED7E9FD317110 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		2E2C2DBC4E458D38DEFC505F /* SmartIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartIntent.swift; sourceTree = "<group>"; };
 		39DD058DFBA5B6616D77EC42 /* KoreanScheduleParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KoreanScheduleParser.swift; sourceTree = "<group>"; };
 		7ABED162B9176394C03E95DE /* AnyQuick.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnyQuick.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -55,6 +57,7 @@
 				B2DE3D456360662BAE8F85AC /* KoreanScheduleParserTests.swift */,
 				20C539BB66ECBEA6BB1161D4 /* OmniCommandApp.swift */,
 				A8F1F4A4BC2AEBBEA57EA3E7 /* OmniViewModel.swift */,
+				24B61D85B3FED7E9FD317110 /* PrivacyInfo.xcprivacy */,
 				2E2C2DBC4E458D38DEFC505F /* SmartIntent.swift */,
 				7EADE673730BFA04702CA2EE /* SmartParser.swift */,
 				D0B7060E17A20A471A8FD200 /* SmartParserTests.swift */,
@@ -144,6 +147,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EDF5CB0AA9ADF3394963A746 /* Assets.xcassets in Resources */,
+				CB31DF72287EBDE1489ADF84 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

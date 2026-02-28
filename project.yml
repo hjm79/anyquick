@@ -23,6 +23,7 @@ targets:
       - path: OmniViewModel.swift
       - path: SmartIntent.swift
       - path: SmartParser.swift
+      - path: PrivacyInfo.xcprivacy
     info:
       path: Info.plist
       properties:
@@ -32,6 +33,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSContactsUsageDescription: "연락처 기반 자동 메시지 추천을 위해 연락처 접근이 필요합니다."
         NSLocationWhenInUseUsageDescription: "현위치 메시지 공유를 위해 위치 접근이 필요합니다."
+        NSCalendarsFullAccessUsageDescription: "일정 등록 기능을 위해 캘린더 접근이 필요합니다."
         NSCalendarsUsageDescription: "일정 등록 기능을 위해 캘린더 접근이 필요합니다."
         NSRemindersUsageDescription: "미리알림 등록 기능을 위해 미리알림 접근이 필요합니다."
         NSSpeechRecognitionUsageDescription: "받아쓰기 기능을 위해 음성 인식 권한이 필요합니다."

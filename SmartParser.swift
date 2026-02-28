@@ -21,13 +21,29 @@ final class SmartParser {
         self.contactPool = Self.normalizeContacts(contacts)
     }
 
+    /// 입력 전처리: 전각→반각, 반복공백 통일
+    func normalizeInput(_ input: String) -> String {
+        var s = input.precomposedStringWithCanonicalMapping
+        s = s.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? s
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 일정 결과에 웹검색 오버라이드 키워드가 포함되어 있는지 확인
+    private static let webSearchOverrideKeywords = ["날씨", "환율", "주가", "뉴스", "검색", "맛집"]
+
     func parse(input: String, baseDate: Date = Date()) -> SmartIntent {
-        let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = normalizeInput(input)
         guard !raw.isEmpty else { return .unknown }
 
-        // Priority 1: Schedule
+        // Priority 1: Schedule (with web search override guard)
         if let schedule = scheduleParser.parse(raw, baseDate: baseDate) {
-            return .addSchedule(schedule)
+            let titleLower = schedule.title
+            let hasWebOverride = Self.webSearchOverrideKeywords.contains(where: { titleLower.contains($0) })
+            if !hasWebOverride {
+                return .addSchedule(schedule)
+            }
+            // 웹검색 오버라이드: 일정 파서 결과를 무시하고 아래로 진행
         }
 
         // Priority 2: Message
@@ -45,7 +61,7 @@ final class SmartParser {
             return navIntent
         }
 
-        // Priority 5: Web Search
+        // Priority 5: Web Search / App Launch
         if let searchIntent = parseWebSearch(raw) {
             return searchIntent
         }
@@ -82,7 +98,7 @@ final class SmartParser {
         } else {
             message = stripCurrentLocationTokens(in: message)
         }
-        message = cleanText(message)
+        message = cleanForMessage(message)
 
         return ContactSelectionContext(
             keyword: keywordMatch.keyword,
@@ -117,7 +133,7 @@ private extension SmartParser {
         } else {
             message = stripCurrentLocationTokens(in: message)
         }
-        message = cleanText(message)
+        message = cleanForMessage(message)
 
         return .sendMessage(targetName: matched.name, message: message, isCurrentLocation: hasCurrentLocation)
     }
@@ -134,16 +150,44 @@ private extension SmartParser {
             "네비게이션", "내비", "네비",
             "안내", "길찾기", "카카오맵", "카카오 맵", "티맵", "지도", "맵"
         ]
-        guard keywords.contains(where: { input.contains($0) }) else { return nil }
+        let hasKeyword = keywords.contains(where: { input.contains($0) })
 
-        var destination = input
-        for keyword in keywords {
-            destination = destination.replacingOccurrences(of: keyword, with: " ")
+        // "A에서 B" / "A부터 B" 패턴 감지 (키워드 없이도 인식)
+        if let regex = try? NSRegularExpression(pattern: #"(.+?)(?:에서|부터)\s+(.+)"#),
+           let match = regex.firstMatch(in: input, range: NSRange(input.startIndex..., in: input)),
+           let originRange = Range(match.range(at: 1), in: input),
+           let destRange = Range(match.range(at: 2), in: input) {
+            var origin = String(input[originRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            var destination = String(input[destRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // 키워드 제거 (있을 경우)
+            for keyword in keywords {
+                origin = origin.replacingOccurrences(of: keyword, with: " ")
+                destination = destination.replacingOccurrences(of: keyword, with: " ")
+            }
+            // "로", "까지" 접미사 제거
+            destination = destination.replacingOccurrences(
+                of: #"\s*(으?로|까지)\s*$"#, with: "", options: .regularExpression
+            )
+            origin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+            destination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !origin.isEmpty && !destination.isEmpty {
+                return .navigation(origin: origin, destination: destination)
+            }
         }
-        destination = cleanText(destination)
-        guard !destination.isEmpty else { return nil }
 
-        return .navigation(destination: destination)
+        // 키워드 기반 단일 목적지 (기존 로직)
+        guard hasKeyword else { return nil }
+
+        var text = input
+        for keyword in keywords {
+            text = text.replacingOccurrences(of: keyword, with: " ")
+        }
+        text = cleanForNavigation(text)
+        guard !text.isEmpty else { return nil }
+
+        return .navigation(origin: nil, destination: text)
     }
 
     func parseWebSearch(_ input: String) -> SmartIntent? {
@@ -157,7 +201,6 @@ private extension SmartParser {
         } else if input.contains("앱스토어") {
             searchType = .appstore
         } else if input.contains("사전") {
-            // 검색어에서 "사전" 제거 후 남은 텍스트의 언어 감지
             let queryForDetect = input.replacingOccurrences(of: "사전", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             searchType = detectDictionaryType(for: queryForDetect)
@@ -173,33 +216,45 @@ private extension SmartParser {
             searchType = .perplexity
         } else if lowercased.contains("grok") || input.contains("그록") {
             searchType = .grok
-        } else if input.contains("알려줘") ||
-                    input.contains("알려 줘") ||
-                    input.contains("물어봐") ||
-                    input.contains("물어 봐") ||
+        // AI 트리거 — 어근 접두사 매칭 (오타/띄어쓰기/존댓말 자동 흡수)
+        } else if ["알려", "물어", "요약해", "번역해", "정리해", "설명해", "분석해", "찾아"]
+                    .contains(where: { input.contains($0) }) ||
                     input.contains("질문") {
-            searchType = .chatgpt
+            searchType = .chatgpt  // OmniViewModel에서 defaultAI로 치환
         } else {
             return nil
         }
 
         var query = input
-        let triggerKeywords = [
+        // 서비스 키워드 제거
+        let serviceKeywords = [
             "유튜브", "넷플릭스", "앱스토어", "사전", "영화", "TMDB", "tmdb",
             "ChatGPT", "chatgpt", "GPT", "gpt", "체티지피티",
             "Gemini", "gemini", "제미나이", "제미니",
             "Claude", "claude", "클로드",
             "Perplexity", "perplexity", "퍼플렉시티",
             "Grok", "grok", "그록",
-            "검색", "찾아줘", "찾아 줘", "알려줘", "알려 줘",
-            "물어봐", "물어 봐", "질문"
+            "검색", "질문"
         ]
-        for keyword in triggerKeywords {
+        for keyword in serviceKeywords {
             query = query.replacingOccurrences(of: keyword, with: " ")
         }
+        // AI 트리거 어근 + 접미사 패턴 제거 (줘/봐/바/조/주세요 등 자동 흡수)
+        let aiStems = ["알려", "물어", "요약해", "번역해", "정리해", "설명해", "분석해", "찾아"]
+        for stem in aiStems {
+            query = query.replacingOccurrences(
+                of: stem + #"[^\s]*"#,
+                with: " ",
+                options: .regularExpression
+            )
+        }
 
-        query = cleanText(query)
-        guard !query.isEmpty else { return nil }
+        query = cleanForSearch(query)
+
+        // 빈 쿼리 → 앱 열기 폴백
+        guard !query.isEmpty else {
+            return .openApp(type: searchType)
+        }
 
         return .webSearch(query: query, type: searchType)
     }
@@ -228,20 +283,41 @@ private extension SmartParser {
         return .dictionaryKorean
     }
 
-    func cleanText(_ text: String) -> String {
+    // MARK: - 인텐트별 전용 클리닝
+
+    /// 메시지용: 수신자, 전송 동사, 채널 키워드 제거
+    func cleanForMessage(_ text: String) -> String {
         var cleaned = text
-
-        let removeTokens = [
-            "에게", "한테", "문자", "메시지", "해줘", "해 줘", "보내줘", "보내 줘",
-            "검색", "알려줘", "알려 줘", "으로", "에서", "틀어줘", "틀어 줘",
-            "좀", "바로", "해주세요", "해 주세요", "카톡", "카카오톡", "공유", "전송"
+        let messageTokens = [
+            "에게", "한테", "께", "문자", "메시지", "해줘", "해 줘", "보내줘", "보내 줘",
+            "보내기", "보내조", "좀", "바로", "해주세요", "해 주세요",
+            "카톡", "카카오톡", "공유", "전송", "틀어줘", "틀어 줘"
         ]
-
-        for token in removeTokens {
+        for token in messageTokens {
             cleaned = cleaned.replacingOccurrences(of: token, with: " ")
         }
+        return normalizeSpaces(cleaned)
+    }
 
-        cleaned = cleaned.replacingOccurrences(of: #"[.,!?~`'\"\(\)\[\]{}<>:;|/\\\-_=+*&^%$#@]"#, with: " ", options: .regularExpression)
+    /// 네비게이션용: 네비 키워드만 제거, "에서" 등 일반 단어 유지
+    func cleanForNavigation(_ text: String) -> String {
+        var cleaned = text
+        let navTokens = ["으로", "좀", "바로", "해줘", "해 줘"]
+        for token in navTokens {
+            cleaned = cleaned.replacingOccurrences(of: token, with: " ")
+        }
+        return normalizeSpaces(cleaned)
+    }
+
+    /// 웹검색용: 쿼리를 최대한 보존, 특수문자만 정리
+    func cleanForSearch(_ text: String) -> String {
+        normalizeSpaces(text)
+    }
+
+    /// 공통: 특수문자 제거 + 공백 정리
+    private func normalizeSpaces(_ text: String) -> String {
+        var cleaned = text
+        cleaned = cleaned.replacingOccurrences(of: #"[.,!?~`'\"\(\)\[\]{}<>:;|\\\-_=+*&^%$#@]"#, with: " ", options: .regularExpression)
         cleaned = cleaned.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -14,11 +14,13 @@ final class OmniViewModel: ObservableObject {
     @Published var contactPickerCandidates: [String] = []
     @Published var isContactPickerPresented: Bool = false
     @Published var isMessageChannelSheetPresented: Bool = false
+    @Published var pendingHasEmail: Bool = false
     @Published var pendingMessageTargetLabel: String = ""
     @Published var isScheduleDestinationSheetPresented: Bool = false
     @Published var pendingScheduleTitle: String = ""
     @Published var isNavigationAppSheetPresented: Bool = false
     @Published var pendingNavigationDestination: String = ""
+    @Published var pendingNavigationOrigin: String? = nil
     @Published var isWebSearchSheetPresented: Bool = false
     @Published var isAIAppSheetPresented: Bool = false
     @Published var pendingAIQuery: String = ""
@@ -30,6 +32,7 @@ final class OmniViewModel: ObservableObject {
     @Published var defaultAIServiceRawValue: String? = nil
     @Published var searchHistory: [String] = []
     @Published var commandAliases: [CommandAlias] = []
+    @Published var appShortcuts: [AppShortcut] = []
     @Published var preferAppForSearch: Bool = true
     @Published var isRecording: Bool = false
 
@@ -117,16 +120,45 @@ final class OmniViewModel: ObservableObject {
         }
 
         if case .sendMessage(let targetName, let message, let isCurrentLocation) = predictedIntent {
-            prepareMessageChannelSelection(
-                targetName: targetName,
-                message: message,
-                includeCurrentLocation: isCurrentLocation
-            )
+            let raw = inputText
+            let phoneKeywords = ["전화해", "전화 해", "전화걸", "전화 걸", "전화줘", "전화 줘", "전화하", "통화"]
+            let emailKeywords = ["이메일", "메일 보내", "메일보내"]
+
+            if phoneKeywords.contains(where: { raw.contains($0) }) {
+                // "전화" 키워드 → 바로 전화 실행
+                Task {
+                    await actionManager.executeMessage(
+                        targetName: targetName,
+                        message: "",
+                        isCurrentLocation: false,
+                        channel: .phone
+                    )
+                    inputText = ""
+                }
+            } else if emailKeywords.contains(where: { raw.contains($0) }) {
+                // "이메일" 키워드 → 바로 이메일 실행
+                Task {
+                    await actionManager.executeMessage(
+                        targetName: targetName,
+                        message: message,
+                        isCurrentLocation: false,
+                        channel: .email
+                    )
+                    inputText = ""
+                }
+            } else {
+                // 일반 → 채널 선택 시트
+                prepareMessageChannelSelection(
+                    targetName: targetName,
+                    message: message,
+                    includeCurrentLocation: isCurrentLocation
+                )
+            }
             return
         }
 
-        if case .navigation(let destination) = predictedIntent {
-            prepareNavigationAppSelection(destination)
+        if case .navigation(let origin, let destination) = predictedIntent {
+            prepareNavigationAppSelection(origin: origin, destination: destination)
             return
         }
 
@@ -189,9 +221,78 @@ final class OmniViewModel: ObservableObject {
         actionManager.addSearchHistory(trimmed)
         searchHistory = actionManager.searchHistory()
 
+        // 지도 숏컷: "A에서 B" 패턴 감지 → route navigation
+        if [.mapNaver, .mapKakaoMap, .mapKakaoNavi, .mapTmap].contains(type),
+           let parsed = parseRoutePattern(trimmed) {
+            Task {
+                await actionManager.openRouteNavigation(
+                    origin: parsed.origin,
+                    destination: parsed.destination,
+                    type: type
+                )
+                inputText = ""
+            }
+            return
+        }
+
         Task {
             await actionManager.execute(.webSearch(query: trimmed, type: type))
             inputText = ""
+        }
+    }
+
+    /// "A에서 B" / "A부터 B" 패턴을 감지하여 출발지/목적지 분리
+    private func parseRoutePattern(_ input: String) -> (origin: String, destination: String)? {
+        guard let regex = try? NSRegularExpression(pattern: #"(.+?)(?:에서|부터)\s+(.+)"#),
+              let match = regex.firstMatch(in: input, range: NSRange(input.startIndex..., in: input)),
+              let originRange = Range(match.range(at: 1), in: input),
+              let destRange = Range(match.range(at: 2), in: input) else {
+            return nil
+        }
+        let origin = String(input[originRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        var destination = String(input[destRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        // "로", "까지" 접미사 제거
+        destination = destination.replacingOccurrences(
+            of: #"\s*(으?로|까지)\s*$"#, with: "", options: .regularExpression
+        )
+        guard !origin.isEmpty, !destination.isEmpty else { return nil }
+        return (origin, destination)
+    }
+
+    /// 경로 숏컷 버튼: 입력 텍스트를 출발지/목적지로 분리하여 route navigation 실행
+    func executeRouteShortcut(type: SearchType) {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        actionManager.addSearchHistory(trimmed)
+        searchHistory = actionManager.searchHistory()
+
+        // "에서/부터" 패턴 우선
+        if let parsed = parseRoutePattern(trimmed) {
+            Task {
+                await actionManager.openRouteNavigation(
+                    origin: parsed.origin,
+                    destination: parsed.destination,
+                    type: type
+                )
+                inputText = ""
+            }
+            return
+        }
+
+        // 공백 기반 분리: 마지막 공백 기준 (앞=출발지, 뒤=목적지)
+        let parts = trimmed.components(separatedBy: " ").filter { !$0.isEmpty }
+        if parts.count >= 2 {
+            let origin = parts.dropLast().joined(separator: " ")
+            let destination = parts.last!
+            Task {
+                await actionManager.openRouteNavigation(
+                    origin: origin,
+                    destination: destination,
+                    type: type
+                )
+                inputText = ""
+            }
         }
     }
 
@@ -243,6 +344,14 @@ final class OmniViewModel: ObservableObject {
         executePendingMessage(channel: .appShare)
     }
 
+    func sendPendingMessageAsPhone() {
+        executePendingMessage(channel: .phone)
+    }
+
+    func sendPendingMessageAsEmail() {
+        executePendingMessage(channel: .email)
+    }
+
     func cancelPendingMessageSelection() {
         isMessageChannelSheetPresented = false
     }
@@ -280,6 +389,7 @@ final class OmniViewModel: ObservableObject {
     func cancelNavigationAppSelection() {
         isNavigationAppSheetPresented = false
         pendingNavigationDestination = ""
+        pendingNavigationOrigin = nil
     }
 
     func searchWithNaver() {
@@ -359,8 +469,9 @@ final class OmniViewModel: ObservableObject {
     /// AI 트리거 키워드(알려줘/물어봐/질문)만으로 AI가 선택된 경우인지 확인
     /// 명시 AI 키워드(chatgpt, grok 등)가 함께 있으면 false (명시가 우선)
     private func isAITriggerInput(_ input: String) -> Bool {
-        let triggers = ["알려줘", "알려 줘", "물어봐", "물어 봐", "질문"]
-        let hasTrigger = triggers.contains { input.contains($0) }
+        // 어근 접두사 매칭 — 오타/띄어쓰기/존댓말 자동 흡수
+        let aiStems = ["알려", "물어", "요약해", "번역해", "정리해", "설명해", "분석해", "찾아"]
+        let hasTrigger = aiStems.contains { input.contains($0) } || input.contains("질문")
         guard hasTrigger else { return false }
 
         // 명시 AI 키워드가 있으면 트리거가 아닌 명시 입력
@@ -459,6 +570,7 @@ final class OmniViewModel: ObservableObject {
         defaultAIServiceRawValue = actionManager.defaultAIService()
         searchHistory = actionManager.searchHistory()
         commandAliases = actionManager.commandAliases()
+        appShortcuts = actionManager.appShortcuts()
         preferAppForSearch = actionManager.preferAppForSearch()
     }
 
@@ -491,6 +603,22 @@ final class OmniViewModel: ObservableObject {
     func removeAlias(id: UUID) {
         actionManager.removeCommandAlias(id: id)
         commandAliases = actionManager.commandAliases()
+    }
+
+    // MARK: App Shortcuts
+
+    func addAppShortcut(name: String, urlScheme: String, iconName: String) {
+        actionManager.addAppShortcut(name: name, urlScheme: urlScheme, iconName: iconName)
+        appShortcuts = actionManager.appShortcuts()
+    }
+
+    func removeAppShortcut(id: UUID) {
+        actionManager.removeAppShortcut(id: id)
+        appShortcuts = actionManager.appShortcuts()
+    }
+
+    func openApp(_ shortcut: AppShortcut) {
+        actionManager.openApp(shortcut)
     }
 
     func matchAlias(_ input: String) -> (alias: CommandAlias, query: String)? {
@@ -558,7 +686,17 @@ final class OmniViewModel: ObservableObject {
         pendingMessageTargetLabel = targetName
         pendingMessageBody = message
         pendingCurrentLocationFlag = includeCurrentLocation
-        isMessageChannelSheetPresented = true
+        pendingHasEmail = false
+
+        // 이메일 존재 여부 확인 후 시트 표시
+        if !targetName.isEmpty {
+            Task {
+                pendingHasEmail = await actionManager.hasEmail(for: targetName)
+                isMessageChannelSheetPresented = true
+            }
+        } else {
+            isMessageChannelSheetPresented = true
+        }
     }
 
     private func prepareScheduleDestinationSelection(_ parsed: ParsedSchedule) {
@@ -567,21 +705,37 @@ final class OmniViewModel: ObservableObject {
         isScheduleDestinationSheetPresented = true
     }
 
-    private func prepareNavigationAppSelection(_ destination: String) {
+    private func prepareNavigationAppSelection(origin: String?, destination: String) {
+        pendingNavigationOrigin = origin
         pendingNavigationDestination = destination
         isNavigationAppSheetPresented = true
     }
 
     private func executePendingNavigation(type: SearchType) {
         let destination = pendingNavigationDestination
+        let origin = pendingNavigationOrigin
         isNavigationAppSheetPresented = false
         pendingNavigationDestination = ""
+        pendingNavigationOrigin = nil
 
         guard !destination.isEmpty else { return }
 
-        Task {
-            await actionManager.execute(.webSearch(query: destination, type: type))
-            inputText = ""
+        // 출발지가 있으면 CLGeocoder로 좌표 변환 후 route URL 생성
+        if let origin, !origin.isEmpty,
+           [.mapNaver, .mapKakaoMap, .mapKakaoNavi, .mapTmap].contains(type) {
+            Task {
+                await actionManager.openRouteNavigation(
+                    origin: origin,
+                    destination: destination,
+                    type: type
+                )
+                inputText = ""
+            }
+        } else {
+            Task {
+                await actionManager.execute(.webSearch(query: destination, type: type))
+                inputText = ""
+            }
         }
     }
 

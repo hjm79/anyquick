@@ -9,6 +9,10 @@ struct ContentView: View {
     @State private var isAddAliasPresented: Bool = false
     @State private var newAliasKeyword: String = ""
     @State private var newAliasSearchType: String = "naver"
+    @State private var isAddAppShortcutPresented: Bool = false
+    @State private var newAppName: String = ""
+    @State private var newAppURLScheme: String = ""
+    @State private var newAppIconName: String = "app.fill"
 
     private enum ShortcutCategory {
         case webSearch
@@ -16,6 +20,7 @@ struct ContentView: View {
         case ai
         case map
         case dictionary
+        case appLaunch
     }
 
     private let columns = [
@@ -25,34 +30,44 @@ struct ContentView: View {
     ]
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.06, green: 0.07, blue: 0.14),
-                    Color(red: 0.08, green: 0.10, blue: 0.22),
-                    Color(red: 0.05, green: 0.06, blue: 0.15)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        VStack(spacing: 0) {
+            inputSection
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 18) {
+                    if !viewModel.searchHistory.isEmpty && viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        searchHistorySection
+                    }
+                    suggestionSection
+                    shortcutGrid
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background {
+            ZStack {
+                // 배경 이미지 (Material이 투과할 대상)
+                Image("AppBackground")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                // 시스템 배경색을 반투명으로 덮어 은은하게 비치도록
+                Color(UIColor.systemGroupedBackground)
+                    .opacity(0.5)
+                    .ignoresSafeArea()
+            }
             .contentShape(Rectangle())
             .onTapGesture {
                 isInputFocused = false
             }
-
-            VStack(spacing: 18) {
-                inputSection
-                if !viewModel.searchHistory.isEmpty && viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    searchHistorySection
-                }
-                suggestionSection
-                shortcutGrid
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
         }
+        .preferredColorScheme(.dark)
         .overlay(alignment: .top) {
             if let notice = viewModel.actionNotice {
                 HStack(spacing: 8) {
@@ -63,15 +78,15 @@ struct ContentView: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
                 .background(.ultraThinMaterial)
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
                 )
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
                 .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -87,14 +102,27 @@ struct ContentView: View {
         .sheet(isPresented: $isScheduleSettingsPresented) {
             scheduleSettingsSheet
         }
+        .sheet(isPresented: $isAddAppShortcutPresented) {
+            addAppShortcutSheet
+        }
         .confirmationDialog(
             "전송 방식을 선택하세요",
             isPresented: $viewModel.isMessageChannelSheetPresented,
             titleVisibility: .visible
         ) {
+            Button("📞 전화 걸기") {
+                isInputFocused = false
+                viewModel.sendPendingMessageAsPhone()
+            }
             Button("문자로 보내기") {
                 isInputFocused = false
                 viewModel.sendPendingMessageAsSMS()
+            }
+            if viewModel.pendingHasEmail {
+                Button("📧 이메일 보내기") {
+                    isInputFocused = false
+                    viewModel.sendPendingMessageAsEmail()
+                }
             }
             Button("앱 선택해서 공유하기") {
                 isInputFocused = false
@@ -105,9 +133,9 @@ struct ContentView: View {
             }
         } message: {
             if viewModel.pendingMessageTargetLabel.isEmpty {
-                Text("문자 또는 공유 시트에서 카카오톡 등 앱을 선택할 수 있습니다.")
+                Text("전화, 문자, 또는 공유 시트에서 카카오톡 등 앱을 선택할 수 있습니다.")
             } else {
-                Text("\(viewModel.pendingMessageTargetLabel)에게 보낼 메시지를 문자 또는 공유 앱으로 전송합니다.")
+                Text("\(viewModel.pendingMessageTargetLabel)에게 전화, 문자, 이메일 또는 공유 앱으로 전송합니다.")
             }
         }
         .confirmationDialog(
@@ -138,27 +166,32 @@ struct ContentView: View {
             isPresented: $viewModel.isNavigationAppSheetPresented,
             titleVisibility: .visible
         ) {
-            Button("카카오맵 검색") {
+            Button("네이버맵") {
+                isInputFocused = false
+                viewModel.navigateWithNaverMap()
+            }
+            Button("카카오맵") {
                 isInputFocused = false
                 viewModel.navigateWithKakaoMap()
             }
-            Button("카카오내비") {
-                isInputFocused = false
-                viewModel.navigateWithKakaoNavi()
-            }
-            Button("티맵 검색") {
-                isInputFocused = false
-                viewModel.navigateWithTmap()
-            }
-            Button("네이버맵 검색") {
-                isInputFocused = false
-                viewModel.navigateWithNaverMap()
+            // A→B 모드가 아닐 때만 카카오내비/티맵 표시
+            if viewModel.pendingNavigationOrigin == nil {
+                Button("카카오내비") {
+                    isInputFocused = false
+                    viewModel.navigateWithKakaoNavi()
+                }
+                Button("티맵 검색") {
+                    isInputFocused = false
+                    viewModel.navigateWithTmap()
+                }
             }
             Button("취소", role: .cancel) {
                 viewModel.cancelNavigationAppSelection()
             }
         } message: {
-            if viewModel.pendingNavigationDestination.isEmpty {
+            if let origin = viewModel.pendingNavigationOrigin {
+                Text("\(origin) → \(viewModel.pendingNavigationDestination)")
+            } else if viewModel.pendingNavigationDestination.isEmpty {
                 Text("길안내에 사용할 앱을 선택하세요.")
             } else {
                 Text("\"\(viewModel.pendingNavigationDestination)\" 길안내에 사용할 앱을 선택하세요.")
@@ -253,9 +286,9 @@ struct ContentView: View {
 
 private extension ContentView {
     var inputSection: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             TextField("검색어를 입력하세요", text: $viewModel.inputText)
-                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
                 .tint(.white)
                 .textInputAutocapitalization(.never)
@@ -267,64 +300,79 @@ private extension ContentView {
                     viewModel.executePredictedIntent()
                 }
 
-            if viewModel.inputText.isEmpty && !viewModel.isRecording {
-                // 입력 비어있을 때: 받아쓰기 + 클립보드
+            if viewModel.inputText.isEmpty && !viewModel.isRecording && !isInputFocused {
                 Button {
                     viewModel.toggleDictation()
                 } label: {
-                    Image(systemName: "mic")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.45))
-                        .frame(width: 32, height: 32)
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Circle())
                 }
 
                 Button {
                     viewModel.pasteFromClipboard()
                 } label: {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.45))
-                        .frame(width: 32, height: 32)
+                    Image(systemName: "doc.on.clipboard.fill")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Circle())
                 }
             } else if viewModel.isRecording {
-                // 녹음 중: 정지 버튼
                 Button {
                     viewModel.toggleDictation()
                 } label: {
                     Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.red)
-                        .opacity(0.8)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                        .opacity(0.9)
                         .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: viewModel.isRecording)
+                        .frame(width: 36, height: 36)
+                        .background(Color.red.opacity(0.8))
+                        .clipShape(Circle())
+                        .shadow(color: .red.opacity(0.5), radius: 8, y: 4)
                 }
             } else {
-                // 텍스트 있을 때: 지우기만
+                // X 버튼: 텍스트가 있으면 지우기, 없으면(포커스만 있는 상태) 키보드 닫기
                 Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        viewModel.inputText = ""
+                    if viewModel.inputText.isEmpty {
+                        isInputFocused = false
+                    } else {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            viewModel.inputText = ""
+                        }
+                        isInputFocused = false
                     }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(
                             isInputFocused
-                                ? Color(red: 0.4, green: 0.6, blue: 1.0).opacity(0.45)
-                                : Color.white.opacity(0.1),
-                            lineWidth: isInputFocused ? 1 : 0.5
+                                ? Color.white.opacity(0.4)
+                                : Color.white.opacity(0.15),
+                            lineWidth: isInputFocused ? 1.5 : 0.5
                         )
                 )
         }
+        .shadow(color: .black.opacity(0.06), radius: 15, y: 6)
     }
 
     @ViewBuilder
@@ -370,19 +418,24 @@ private extension ContentView {
                     color: .orange
                 )
             case .sendMessage(let targetName, let message, let isCurrentLocation):
+                let raw = viewModel.inputText
+                let isPhone = ["전화해", "전화 해", "전화걸", "전화 걸", "전화줘", "전화 줘", "전화하", "통화"].contains(where: { raw.contains($0) })
+                let isEmail = ["이메일", "메일 보내", "메일보내"].contains(where: { raw.contains($0) })
+                let cardTitle = isPhone ? "전화 걸기" : isEmail ? "이메일 보내기" : "연락"
+                let cardIcon = isPhone ? "phone.fill" : isEmail ? "envelope.fill" : "person.crop.circle.fill"
                 suggestionCard(
-                    icon: "message.fill",
-                    title: "메시지 발송",
+                    icon: cardIcon,
+                    title: cardTitle,
                     subtitle: targetName,
                     detail: isCurrentLocation ? "\(message) · 카카오/네이버 위치링크 포함" : message,
-                    color: .green
+                    color: isPhone ? .blue : isEmail ? .orange : .green
                 )
-            case .navigation(let destination):
+            case .navigation(let origin, let destination):
                 suggestionCard(
                     icon: "car.fill",
                     title: "길안내 시작",
-                    subtitle: destination,
-                    detail: "탭하면 내비게이션을 실행해요",
+                    subtitle: origin != nil ? "\(origin!) → \(destination)" : destination,
+                    detail: origin != nil ? "출발지와 목적지를 지정하여 길안내" : "탭하면 내비게이션을 실행해요",
                     color: .blue
                 )
             case .webSearch(let query, let type):
@@ -392,6 +445,14 @@ private extension ContentView {
                     subtitle: query,
                     detail: searchTypeLabel(type),
                     color: .purple
+                )
+            case .openApp(let type):
+                suggestionCard(
+                    icon: "app.fill",
+                    title: "앱 열기",
+                    subtitle: searchTypeLabel(type),
+                    detail: "탭하면 앱을 실행해요",
+                    color: .cyan
                 )
             }
         }
@@ -437,7 +498,7 @@ private extension ContentView {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.25))
             }
-            .padding(16)
+            .padding(20)
             .frame(maxWidth: .infinity)
             .frame(height: 120)
             .background(.ultraThinMaterial)
@@ -446,10 +507,11 @@ private extension ContentView {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(color.opacity(0.2), lineWidth: 0.5)
             )
-            .shadow(color: color.opacity(0.15), radius: 16, y: 6)
+            .shadow(color: color.opacity(0.08), radius: 15, y: 6)
         }
         .buttonStyle(.plain)
         .transition(.scale(scale: 0.95).combined(with: .opacity))
+        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: viewModel.inputText)
     }
 
     var contactPickerSheet: some View {
@@ -554,6 +616,42 @@ private extension ContentView {
                 } footer: {
                     Text("입력 시 별칭 키워드로 시작하면 해당 서비스로 바로 검색\n예: \"yt 강남맛집\" → YouTube 검색")
                 }
+
+                // MARK: 앱 바로가기 설정
+                Section {
+                    ForEach(viewModel.appShortcuts) { shortcut in
+                        HStack {
+                            Image(systemName: shortcut.iconName)
+                                .foregroundStyle(.pink)
+                                .frame(width: 24)
+                            VStack(alignment: .leading) {
+                                Text(shortcut.name)
+                                Text(shortcut.urlScheme)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { indexSet in
+                        for index in indexSet {
+                            let shortcut = viewModel.appShortcuts[index]
+                            viewModel.removeAppShortcut(id: shortcut.id)
+                        }
+                    }
+
+                    Button {
+                        newAppName = ""
+                        newAppURLScheme = ""
+                        newAppIconName = "app.fill"
+                        isAddAppShortcutPresented = true
+                    } label: {
+                        Label("앱 추가", systemImage: "plus.circle")
+                    }
+                } header: {
+                    Text("앱 바로가기")
+                } footer: {
+                    Text("등록한 앱을 숏컷 그리드에서 바로 실행\nURL Scheme 예: kakaotalk:// instagram://")
+                }
             }
             .navigationTitle("환경설정")
             .navigationBarTitleDisplayMode(.inline)
@@ -607,11 +705,97 @@ private extension ContentView {
         }
     }
 
+
     private var calendarBinding: Binding<String?> {
         Binding(
             get: { viewModel.selectedEventCalendarIdentifier },
             set: { viewModel.updatePreferredEventCalendar(identifier: $0) }
         )
+    }
+
+    // MARK: - 앱 추가 시트
+    private var addAppShortcutSheet: some View {
+        NavigationView {
+            Form {
+                Section("앱 이름") {
+                    TextField("예: 카카오톡, 인스타그램", text: $newAppName)
+                }
+
+                Section("URL Scheme") {
+                    TextField("예: kakaotalk://", text: $newAppURLScheme)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .keyboardType(.URL)
+                }
+
+                Section("아이콘 선택") {
+                    let iconOptions = [
+                        "bubble.left.fill", "phone.fill", "video.fill", "envelope.fill",
+                        "camera.fill", "photo.fill", "music.note", "play.circle.fill",
+                        "cart.fill", "bag.fill", "creditcard.fill", "banknote.fill",
+                        "heart.fill", "star.fill", "bookmark.fill", "flag.fill",
+                        "house.fill", "building.2.fill", "car.fill", "airplane",
+                        "globe", "map.fill", "location.fill", "safari.fill",
+                        "gamecontroller.fill", "headphones", "tv.fill", "desktopcomputer",
+                        "doc.text.fill", "folder.fill", "pencil", "paintbrush.fill",
+                        "wrench.fill", "gearshape.fill", "lock.fill", "key.fill",
+                        "bell.fill", "clock.fill", "calendar", "person.fill",
+                        "figure.run", "fork.knife", "cup.and.saucer.fill", "leaf.fill",
+                        "app.fill", "square.grid.2x2.fill", "bolt.fill", "flame.fill"
+                    ]
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 10) {
+                        ForEach(iconOptions, id: \.self) { icon in
+                            Button {
+                                newAppIconName = icon
+                            } label: {
+                                Image(systemName: icon)
+                                    .font(.system(size: 20))
+                                    .frame(width: 44, height: 44)
+                                    .background(
+                                        newAppIconName == icon
+                                            ? Color.pink.opacity(0.2)
+                                            : Color.clear
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(
+                                                newAppIconName == icon ? Color.pink : Color.clear,
+                                                lineWidth: 2
+                                            )
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(newAppIconName == icon ? .pink : .primary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("앱 추가")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") {
+                        isAddAppShortcutPresented = false
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("추가") {
+                        viewModel.addAppShortcut(
+                            name: newAppName,
+                            urlScheme: newAppURLScheme,
+                            iconName: newAppIconName.isEmpty ? "app.fill" : newAppIconName
+                        )
+                        isAddAppShortcutPresented = false
+                    }
+                    .disabled(
+                        newAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        newAppURLScheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                }
+            }
+        }
     }
 
     private var reminderBinding: Binding<String?> {
@@ -697,7 +881,7 @@ private extension ContentView {
     }
 
     private var aliasServiceOptions: [SearchType] {
-        [.naver, .google, .youtube, .appstore, .chatgpt, .gemini, .claude, .perplexity, .grok, .dictionaryEnglish, .dictionaryKorean, .dictionaryHanja]
+        [.naver, .google, .youtube, .appstore, .chatgpt, .gemini, .claude, .perplexity, .grok, .dictionary, .dictionaryEnglish, .dictionaryKorean, .dictionaryHanja]
     }
 
     private func handleURLScheme(_ url: URL) {
@@ -733,6 +917,7 @@ private extension ContentView {
                 categoryButton(title: "지도", icon: "map.fill", category: .map)
                 categoryButton(title: "사전", icon: "character.book.closed.fill", category: .dictionary)
                 reminderQuickButton
+                appLaunchCategoryButton
             }
 
             if let selectedShortcutCategory {
@@ -759,10 +944,21 @@ private extension ContentView {
                         quickButton(title: "KakaoMap", icon: "mappin.and.ellipse", type: .mapKakaoMap)
                         quickButton(title: "카카오길안내", icon: "location.north.line.fill", type: .mapKakaoNavi)
                         quickButton(title: "Tmap", icon: "car.fill", type: .mapTmap)
+                        // 입력에 공백이 있으면 경로 숏컷 표시 (A B → A→B 길찾기)
+                        if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .contains(" ") {
+                            routeButton(title: "네이버 경로", icon: "arrow.triangle.turn.up.right.diamond.fill", type: .mapNaver)
+                            routeButton(title: "카카오 경로", icon: "arrow.triangle.turn.up.right.diamond.fill", type: .mapKakaoMap)
+                        }
                     case .dictionary:
                         quickButton(title: "영어사전", icon: "textformat.abc", type: .dictionaryEnglish)
                         quickButton(title: "국어사전", icon: "character.ko", type: .dictionaryKorean)
                         quickButton(title: "한자사전", icon: "character.zh", type: .dictionaryHanja)
+                    case .appLaunch:
+                        ForEach(viewModel.appShortcuts) { shortcut in
+                            appShortcutButton(shortcut)
+                        }
+                        addAppButton
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -797,7 +993,7 @@ private extension ContentView {
             isInputFocused = false
             viewModel.executeLocationShareShortcut()
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: "location.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.blue)
@@ -805,15 +1001,15 @@ private extension ContentView {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
-            .background(Color.blue.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.blue.opacity(0.2), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.blue.opacity(0.15), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -824,7 +1020,7 @@ private extension ContentView {
             isInputFocused = false
             viewModel.executeReminderShortcut()
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: "checklist")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.cyan)
@@ -832,20 +1028,20 @@ private extension ContentView {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
-            .background(Color.cyan.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.cyan.opacity(0.2), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.cyan.opacity(0.15), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
         .disabled(!hasInputText)
-        .opacity(hasInputText ? 1.0 : 0.4)
+        .opacity(hasInputText ? 1.0 : 0.65)
     }
 
     private func categoryColor(for category: ShortcutCategory) -> Color {
@@ -855,7 +1051,103 @@ private extension ContentView {
         case .ai: return .purple
         case .map: return .green
         case .dictionary: return .mint
+        case .appLaunch: return .pink
         }
+    }
+
+    // MARK: - 앱열기 카테고리 버튼 (검색어 없이도 활성)
+    private var appLaunchCategoryButton: some View {
+        let isSelected = selectedShortcutCategory == .appLaunch
+        let brandColor = Color.pink
+
+        return Button {
+            isInputFocused = false
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                selectedShortcutCategory = isSelected ? nil : .appLaunch
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isSelected ? brandColor : .secondary)
+                Text("앱열기")
+                    .font(.system(size: 13, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .foregroundStyle(isSelected ? brandColor : .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        isSelected ? brandColor.opacity(0.5) : Color.white.opacity(0.06),
+                        lineWidth: isSelected ? 1.2 : 0.5
+                    )
+            )
+            .shadow(color: isSelected ? brandColor.opacity(0.15) : .clear, radius: 8, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 등록된 앱 버튼
+    private func appShortcutButton(_ shortcut: AppShortcut) -> some View {
+        Button {
+            isInputFocused = false
+            viewModel.openApp(shortcut)
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: shortcut.iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.pink)
+                Text(shortcut.name)
+                    .font(.system(size: 13, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.pink.opacity(0.15), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 앱 추가 버튼
+    private var addAppButton: some View {
+        Button {
+            newAppName = ""
+            newAppURLScheme = ""
+            newAppIconName = "app.fill"
+            isAddAppShortcutPresented = true
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.pink.opacity(0.6))
+                Text("앱 추가")
+                    .font(.system(size: 13, weight: .bold))
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5]))
+                    .foregroundStyle(Color.pink.opacity(0.3))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func categoryButton(title: String, icon: String, category: ShortcutCategory) -> some View {
@@ -864,53 +1156,36 @@ private extension ContentView {
 
         return Button {
             isInputFocused = false
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                 selectedShortcutCategory = isSelected ? nil : category
             }
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isSelected ? brandColor : Color.white.opacity(0.8))
+                    .foregroundStyle(isSelected ? brandColor : .secondary)
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .foregroundStyle(isSelected ? brandColor : Color.white.opacity(0.6))
+                    .foregroundStyle(isSelected ? brandColor : .secondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: isSelected
-                                ? [brandColor.opacity(0.22), brandColor.opacity(0.08)]
-                                : [Color.white.opacity(0.09), Color.white.opacity(0.04)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .overlay(alignment: .top) {
-                        // 상단 하이라이트 라인
-                        Capsule()
-                            .fill(isSelected ? brandColor.opacity(0.5) : Color.white.opacity(0.08))
-                            .frame(width: 40, height: 2)
-                            .padding(.top, 4)
-                    }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
-                        isSelected ? brandColor.opacity(0.35) : Color.white.opacity(0.06),
-                        lineWidth: 0.5
+                        isSelected ? brandColor.opacity(0.5) : Color.white.opacity(0.06),
+                        lineWidth: isSelected ? 1.2 : 0.5
                     )
             )
+            .shadow(color: isSelected ? brandColor.opacity(0.15) : .clear, radius: 8, y: 4)
         }
         .buttonStyle(.plain)
         .disabled(!hasInputText)
-        .opacity(hasInputText ? 1.0 : 0.4)
+        .opacity(hasInputText ? 1.0 : 0.65)
     }
 
     private func brandColor(for type: SearchType) -> Color {
@@ -940,43 +1215,57 @@ private extension ContentView {
             isInputFocused = false
             viewModel.executeManualSearch(type: type)
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(color)
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.16), color.opacity(0.05)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .overlay(alignment: .top) {
-                        Capsule()
-                            .fill(color.opacity(0.35))
-                            .frame(width: 30, height: 2)
-                            .padding(.top, 4)
-                    }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(color.opacity(0.15), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
         .disabled(!hasInputText)
-        .opacity(hasInputText ? 1.0 : 0.4)
+        .opacity(hasInputText ? 1.0 : 0.65)
+    }
+
+    func routeButton(title: String, icon: String, type: SearchType) -> some View {
+        return Button {
+            isInputFocused = false
+            viewModel.executeRouteShortcut(type: type)
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 72)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasInputText)
+        .opacity(hasInputText ? 1.0 : 0.65)
     }
 
     func searchTypeLabel(_ type: SearchType) -> String {
@@ -986,7 +1275,7 @@ private extension ContentView {
         case .netflix: return "Netflix 검색"
         case .tmdb: return "TMDB 검색"
         case .appstore: return "App Store 검색"
-        case .dictionary: return "사전 검색"
+        case .dictionary: return "통합사전 (자동감지)"
         case .dictionaryEnglish: return "영어사전"
         case .dictionaryKorean: return "국어사전"
         case .dictionaryHanja: return "한자사전"
@@ -1025,3 +1314,4 @@ private extension ContentView {
 #Preview {
     ContentView()
 }
+

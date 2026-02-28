@@ -20,10 +20,25 @@ struct CommandAlias: Codable, Identifiable, Equatable {
     }
 }
 
+struct AppShortcut: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String        // "카카오톡"
+    var urlScheme: String   // "kakaotalk://"
+    var iconName: String    // SF Symbol: "bubble.left.fill"
+
+    init(name: String, urlScheme: String, iconName: String) {
+        self.id = UUID()
+        self.name = name
+        self.urlScheme = urlScheme
+        self.iconName = iconName
+    }
+}
+
 enum SmartIntent {
     case addSchedule(ParsedSchedule)
     case sendMessage(targetName: String, message: String, isCurrentLocation: Bool)
-    case navigation(destination: String)
+    case navigation(origin: String?, destination: String)
     case webSearch(query: String, type: SearchType)
+    case openApp(type: SearchType)
     case unknown
 }
