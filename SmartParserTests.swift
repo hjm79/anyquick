@@ -84,4 +84,87 @@ final class SmartParserTests: XCTestCase {
         XCTAssertEqual(targetName, "정만")
         XCTAssertTrue(isCurrentLocation)
     }
+
+    func testLocationShareCommandWithoutContactUsesSendMessageIntent() {
+        let parser = SmartParser(contacts: [])
+        let intent = parser.parse(input: "현재위치 카톡 보내기")
+
+        guard case .sendMessage(let targetName, let message, let isCurrentLocation) = intent else {
+            XCTFail("Expected sendMessage intent")
+            return
+        }
+
+        XCTAssertEqual(targetName, "")
+        XCTAssertEqual(message, "")
+        XCTAssertTrue(isCurrentLocation)
+    }
+
+    func testLocationShareCommandWithPositionKeywordUsesSendMessageIntent() {
+        let parser = SmartParser(contacts: [])
+        let intent = parser.parse(input: "위치 메시지 보내줘")
+
+        guard case .sendMessage(let targetName, let message, let isCurrentLocation) = intent else {
+            XCTFail("Expected sendMessage intent")
+            return
+        }
+
+        XCTAssertEqual(targetName, "")
+        XCTAssertEqual(message, "")
+        XCTAssertTrue(isCurrentLocation)
+    }
+
+    func testMessageTreatsLocationKeywordAsCurrentLocationWhenSharing() {
+        let parser = SmartParser(contacts: ["정만"])
+        let intent = parser.parse(input: "정만에게 위치 카톡 보내기")
+
+        guard case .sendMessage(let targetName, let message, let isCurrentLocation) = intent else {
+            XCTFail("Expected sendMessage intent")
+            return
+        }
+
+        XCTAssertEqual(targetName, "정만")
+        XCTAssertEqual(message, "")
+        XCTAssertTrue(isCurrentLocation)
+    }
+
+    func testContactSelectionContextTreatsLocationKeywordAsCurrentLocationWhenSharing() {
+        let parser = SmartParser(contacts: ["정만", "정만수"])
+        let context = parser.contactSelectionContext(input: "정만에게 위치 카톡 보내기")
+
+        XCTAssertNotNil(context)
+        XCTAssertEqual(context?.isCurrentLocation, true)
+        XCTAssertEqual(context?.message, "")
+    }
+
+    func testLocationShareShortcutSkipsWhenRecipientParticleExists() {
+        let parser = SmartParser(contacts: [])
+        let intent = parser.parse(input: "정만에게 위치 카톡 보내기")
+
+        if case .sendMessage = intent {
+            XCTFail("Should not shortcut to sendMessage when recipient particle exists")
+        }
+    }
+    func testNavigationStripsCompoundKeywordKakaoNavi() {
+        let parser = SmartParser(contacts: [])
+        let intent = parser.parse(input: "카카오내비 강남역")
+
+        guard case .navigation(let destination) = intent else {
+            XCTFail("Expected navigation intent")
+            return
+        }
+
+        XCTAssertEqual(destination, "강남역")
+    }
+
+    func testNavigationStripsSimpleKeyword() {
+        let parser = SmartParser(contacts: [])
+        let intent = parser.parse(input: "강남역 내비")
+
+        guard case .navigation(let destination) = intent else {
+            XCTFail("Expected navigation intent")
+            return
+        }
+
+        XCTAssertEqual(destination, "강남역")
+    }
 }

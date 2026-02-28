@@ -1,6 +1,7 @@
 name: AnyQuick
 options:
   minimumXcodeGenVersion: 2.38.0
+  xcodeVersion: "26.1"
 settings:
   base:
     SWIFT_VERSION: 5.0
@@ -14,6 +15,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hjm.anyquick
     sources:
+      - path: Assets.xcassets
       - path: ActionManager.swift
       - path: ContentView.swift
       - path: KoreanScheduleParser.swift
@@ -31,6 +33,31 @@ targets:
         NSContactsUsageDescription: "연락처 기반 자동 메시지 추천을 위해 연락처 접근이 필요합니다."
         NSLocationWhenInUseUsageDescription: "현위치 메시지 공유를 위해 위치 접근이 필요합니다."
         NSCalendarsUsageDescription: "일정 등록 기능을 위해 캘린더 접근이 필요합니다."
+        NSRemindersUsageDescription: "미리알림 등록 기능을 위해 미리알림 접근이 필요합니다."
+        NSSpeechRecognitionUsageDescription: "받아쓰기 기능을 위해 음성 인식 권한이 필요합니다."
+        NSMicrophoneUsageDescription: "받아쓰기 기능을 위해 마이크 접근이 필요합니다."
+        LSApplicationQueriesSchemes:
+          - nmap
+          - kakaomap
+          - tmap
+          - youtube
+          - nflx
+          - naversearchapp
+          - coupang
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - anyquick
+            CFBundleURLName: com.hjm.anyquick
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
 
   AnyQuickTests:
     type: bundle.unit-test
@@ -39,6 +66,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hjm.anyquick.tests
+        GENERATE_INFOPLIST_FILE: YES
     sources:
       - path: KoreanScheduleParserTests.swift
       - path: SmartParserTests.swift
